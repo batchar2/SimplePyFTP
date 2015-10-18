@@ -1,3 +1,3 @@
 # SimplePyFTP
 
-Простой FTP сервре написанный на Python
+Простой FTP сервер написанный на Python
