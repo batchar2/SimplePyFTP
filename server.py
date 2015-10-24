@@ -5,6 +5,13 @@ import sys
 import signal
 import socket
 
+"""
+Модуль проверки данных пользователя
+взят https://github.com/FirefighterBlu3/python-pam.git
+"""
+import pam
+
+
 class ParseData(object):
     """ Парсинг ответов ftp клиента. Реализация процедур в виде статическийх методов """
 
@@ -36,17 +43,64 @@ class ParseData(object):
 class FtpSession(object):
     """ Класс заведует проверкай пользователя на "наличие" и авторизацией """
     def __init__(self):
-        self.user = None
-        self.password = None
+        self.user = ''
+        self.password = ''
         self.__is_autorization = False
 
+        self.__UID = os.getuid()
+        self.__GID = os.getgid()
+
+    def __get_uid_guid(self):
+        """ Получаю из файла /etc/passwd значения для UID и GID """
+
+        fp = open('/etc/passwd', 'r')
+        user_data = [line.split(":") for line in fp if line.find(self.user) != -1]
+        fp.close()
+
+        print user_data
+
+        for user in user_data:
+            if user[0] == self.user:
+                self.__UID = int(user[2])
+                self.__GID = int(user[3])
+
+                print self.__UID, self.__GID
+
+                return True
+
+        return False
+        
     def user_authorization(self):
-        self.__is_autorization = True
-        return True
+        if not self.__is_autorization:
+            p = pam.pam()
+            ret = p.authenticate(self.user, self.password)
+
+            if ret is True:
+                self.__is_autorization = True
+                
+                # получаю идентификаторы пользователя
+                if self.__get_uid_guid() is False:
+                    return False
+
+                # Изменяем права процесса
+                os.setgid(self.__UID)
+                os.setegid(self.__UID)
+                
+                os.setuid(self.__GID)
+                os.seteuid(self.__GID) 
+            else:
+                self.__is_autorization = False
+        return ret
 
     @property
     def is_autorization(self):
         return self.__is_autorization
+
+    def autorization(method):
+        """ Декоратор, блокирующий передачу данных для неавторизоавнных пользователей """
+        def wrapper(self):
+            pass
+        return wrapper
     
 
 
@@ -118,7 +172,7 @@ class ClientConnect(object):
         if self.__session.user_authorization():  
             return '230 Login successful.'
         else:
-            pass
+            return '530 Login incorrect'
 
     @send_data
     def LIST(self, recv_data):
@@ -136,8 +190,11 @@ class ClientConnect(object):
 
     @send_data
     def SYST(self, recv_data):
-        """ Определение типа системы """
-        return '215 UNIX Type: L8'
+        """ Определение типа системы или состояния """
+        if self.__session.is_autorization is False:
+            return '530 Please login with USER and PASS.'
+        else:
+            return '215 UNIX Type: L8'
 
     @send_data
     def PWD(self, recv_data):
